@@ -1,7 +1,10 @@
 "use client";
 
-import React, { useState } from 'react';
-import { EyeIcon, PencilIcon, TrashIcon } from '@heroicons/react/solid';
+import React, { useState, useEffect } from 'react';
+import { EyeIcon, PencilIcon, TrashIcon, CheckIcon, XIcon } from '@heroicons/react/solid';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
 
 interface ApiKey {
   id: number;
@@ -11,33 +14,132 @@ interface ApiKey {
 }
 
 export default function Overview() {
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>([
-    { id: 1, name: 'default', usage: 0, key: 'tvly-****************************' },
-    { id: 2, name: 'new-api-key', usage: 0, key: 'tvly-****************************' },
-    { id: 3, name: 'cli', usage: 0, key: 'tvly-****************************' },
-  ]);
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [visibleKeyId, setVisibleKeyId] = useState<number | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newKeyName, setNewKeyName] = useState('');
   const [limitMonthlyUsage, setLimitMonthlyUsage] = useState(false);
   const [monthlyLimit, setMonthlyLimit] = useState(1000);
+  const [editingKeyId, setEditingKeyId] = useState<number | null>(null);
+  const [editingKeyName, setEditingKeyName] = useState('');
+  const [deletingKeyId, setDeletingKeyId] = useState<number | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchApiKeys();
+  }, []);
+
+  const fetchApiKeys = async () => {
+    setIsLoading(true);
+    setError(null);
+    const { data, error } = await supabase
+      .from('api_keys')
+      .select('*')
+      .order('id', { ascending: true });
+    
+    if (error) {
+      console.error('Error fetching API keys:', error);
+      setError('Failed to fetch API keys. Please try again.');
+    } else {
+      setApiKeys(data || []);
+    }
+    setIsLoading(false);
+  };
 
   const openModal = () => setIsModalOpen(true);
-  const closeModal = () => setIsModalOpen(false);
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setNewKeyName('');
+    setNameError(null);
+  };
 
-  const handleCreateKey = () => {
-    // Logic to create a new API key
-    const newKey: ApiKey = {
-      id: apiKeys.length + 1,
-      name: newKeyName,
+  const handleCreateKey = async () => {
+    if (!newKeyName.trim()) {
+      setNameError("Please enter a name for the API key.");
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    const newKey: Omit<ApiKey, 'id'> = {
+      name: newKeyName.trim(),
       usage: 0,
       key: 'tvly-' + Math.random().toString(36).substr(2, 32),
     };
-    setApiKeys([...apiKeys, newKey]);
-    closeModal();
-    setNewKeyName('');
-    setLimitMonthlyUsage(false);
-    setMonthlyLimit(1000);
+
+    const { data, error } = await supabase
+      .from('api_keys')
+      .insert([newKey])
+      .select();
+
+    if (error) {
+      console.error('Error creating API key:', error);
+      setError('Failed to create API key. Please try again.');
+    } else {
+      setApiKeys([...apiKeys, data[0]]);
+      closeModal();
+    }
+    setIsLoading(false);
+  };
+
+  const startEditing = (key: ApiKey) => {
+    setEditingKeyId(key.id);
+    setEditingKeyName(key.name);
+  };
+
+  const cancelEditing = () => {
+    setEditingKeyId(null);
+    setEditingKeyName('');
+  };
+
+  const saveEditing = async () => {
+    setIsLoading(true);
+    setError(null);
+    const { data, error } = await supabase
+      .from('api_keys')
+      .update({ name: editingKeyName })
+      .eq('id', editingKeyId)
+      .select();
+
+    if (error) {
+      console.error('Error updating API key:', error);
+      setError('Failed to update API key. Please try again.');
+    } else {
+      setApiKeys(apiKeys.map(key => 
+        key.id === editingKeyId ? data[0] : key
+      ));
+      setEditingKeyId(null);
+      setEditingKeyName('');
+    }
+    setIsLoading(false);
+  };
+
+  const confirmDelete = (id: number) => {
+    setDeletingKeyId(id);
+  };
+
+  const cancelDelete = () => {
+    setDeletingKeyId(null);
+  };
+
+  const deleteApiKey = async (id: number) => {
+    setIsLoading(true);
+    setError(null);
+    const { error } = await supabase
+      .from('api_keys')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error('Error deleting API key:', error);
+      setError('Failed to delete API key. Please try again.');
+    } else {
+      setApiKeys(apiKeys.filter(key => key.id !== id));
+      setDeletingKeyId(null);
+    }
+    setIsLoading(false);
   };
 
   return (
@@ -85,20 +187,42 @@ export default function Overview() {
             <tbody>
               {apiKeys.map((key) => (
                 <tr key={key.id} className="border-t">
-                  <td className="py-2">{key.name}</td>
+                  <td className="py-2">
+                    {editingKeyId === key.id ? (
+                      <input
+                        type="text"
+                        value={editingKeyName}
+                        onChange={(e) => setEditingKeyName(e.target.value)}
+                        className="border rounded px-2 py-1"
+                      />
+                    ) : (
+                      key.name
+                    )}
+                  </td>
                   <td className="py-2">{key.usage}</td>
                   <td className="py-2">
                     {visibleKeyId === key.id ? key.key : key.key.replace(/./g, '*')}
                   </td>
-                  <td className="py-2">
+                  <td className="py-2 flex items-center">
                     <button onClick={() => setVisibleKeyId(visibleKeyId === key.id ? null : key.id)}>
                       <EyeIcon className="h-5 w-5 text-gray-400" />
                     </button>
-                    <button>
-                      <PencilIcon className="h-5 w-5 text-gray-400 ml-2" />
-                    </button>
-                    <button>
-                      <TrashIcon className="h-5 w-5 text-gray-400 ml-2" />
+                    {editingKeyId === key.id ? (
+                      <>
+                        <button onClick={saveEditing} className="ml-2">
+                          <CheckIcon className="h-5 w-5 text-green-500" />
+                        </button>
+                        <button onClick={cancelEditing} className="ml-2">
+                          <XIcon className="h-5 w-5 text-red-500" />
+                        </button>
+                      </>
+                    ) : (
+                      <button onClick={() => startEditing(key)} className="ml-2">
+                        <PencilIcon className="h-5 w-5 text-gray-400" />
+                      </button>
+                    )}
+                    <button onClick={() => confirmDelete(key.id)} className="ml-2">
+                      <TrashIcon className="h-5 w-5 text-gray-400" />
                     </button>
                   </td>
                 </tr>
@@ -126,10 +250,14 @@ export default function Overview() {
                 <input
                   type="text"
                   value={newKeyName}
-                  onChange={(e) => setNewKeyName(e.target.value)}
-                  className="w-full p-2 border rounded"
+                  onChange={(e) => {
+                    setNewKeyName(e.target.value);
+                    setNameError(null);
+                  }}
+                  className={`w-full p-2 border rounded ${nameError ? 'border-red-500' : ''}`}
                   placeholder="Key Name"
                 />
+                {nameError && <p className="text-red-500 text-sm mt-1">{nameError}</p>}
               </div>
               <div className="mb-4">
                 <label className="flex items-center">
@@ -168,6 +296,43 @@ export default function Overview() {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {deletingKeyId !== null && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+            <div className="bg-white p-8 rounded-lg w-96">
+              <h2 className="text-2xl font-bold mb-4">Delete API Key</h2>
+              <p className="mb-4">Are you sure you want to delete this API key? This action cannot be undone.</p>
+              <div className="flex justify-end">
+                <button
+                  onClick={() => deleteApiKey(deletingKeyId)}
+                  className="bg-red-500 text-white px-4 py-2 rounded mr-2"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={cancelDelete}
+                  className="bg-gray-300 text-gray-700 px-4 py-2 rounded"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+            <strong className="font-bold">Error!</strong>
+            <span className="block sm:inline"> {error}</span>
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="flex justify-center items-center">
+            <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900"></div>
           </div>
         )}
       </div>
