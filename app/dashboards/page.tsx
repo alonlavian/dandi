@@ -106,6 +106,11 @@ export default function Overview() {
   };
 
   const saveEditing = async () => {
+    if (!editingKeyName.trim()) {
+      setNameError("Please enter a valid name for the API key.");
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     const { data, error } = await supabase
@@ -185,6 +190,12 @@ export default function Overview() {
         <ToastContainer />
         <div className="max-w-7xl mx-auto p-8">
           <h2 className="text-2xl font-bold mb-4">Overview</h2>
+          <button 
+            className="bg-blue-600 text-white px-4 py-2 rounded mb-4"
+            onClick={openModal}
+          >
+            New API Key
+          </button>
           <Dashboard 
             apiKeys={apiKeys}
             visibleKeyId={visibleKeyId}
